@@ -60,7 +60,13 @@ public:
   static const uint8_t MACRAW = 0x04;
   static const uint8_t PPPOE  = 0x05;
   static const uint8_t ND     = 0x20;
+  static const uint8_t MC     = 0x20;
+  static const uint8_t MMD    = 0x20;
+  static const uint8_t UCASTB = 0x40;
+  static const uint8_t MIP6B  = 0x40;
+  static const uint8_t BCASTB = 0x80;
   static const uint8_t MULTI  = 0x80;
+  static const uint8_t MFEN   = 0x80;
 };
 
 enum SockCMD {

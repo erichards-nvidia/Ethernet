@@ -52,6 +52,7 @@
 #include "Client.h"
 #include "Server.h"
 #include "Udp.h"
+#include "Linklocal.h"
 
 enum EthernetLinkStatus {
 	Unknown,
@@ -67,18 +68,22 @@ enum EthernetHardwareStatus {
 };
 
 class EthernetUDP;
+class EthernetRaw;
 class EthernetClient;
 class EthernetServer;
 class DhcpClass;
+class LinkLocalClass;
 
 class EthernetClass {
 private:
 	static IPAddress _dnsServerAddress;
 	static DhcpClass* _dhcp;
+	static LinkLocalClass* _ll;
 public:
 	// Initialise the Ethernet shield to use the provided MAC address and
 	// gain the rest of the configuration through DHCP.
-	// Returns 0 if the DHCP configuration failed, and 1 if it succeeded
+	// If DHCP fails attempt to get a Link-Local address.
+	// Returns 0 if the DHCP & Link-Local configuration failed, and 1 if it succeeded
 	static int begin(uint8_t *mac, unsigned long timeout = 60000, unsigned long responseTimeout = 4000);
 	static int maintain();
 	static EthernetLinkStatus linkStatus();
@@ -108,9 +113,12 @@ public:
 	friend class EthernetClient;
 	friend class EthernetServer;
 	friend class EthernetUDP;
+	friend class EthernetRaw;
+	
 private:
 	// Opens a socket(TCP or UDP or IP_RAW mode)
 	static uint8_t socketBegin(uint8_t protocol, uint16_t port);
+	static uint8_t socketBeginRaw(uint8_t protocol, uint16_t port);
 	static uint8_t socketBeginMulticast(uint8_t protocol, IPAddress ip,uint16_t port);
 	static uint8_t socketStatus(uint8_t s);
 	// Close socket
@@ -208,7 +216,62 @@ public:
 	virtual uint16_t localPort() { return _port; }
 };
 
+class EthernetRaw {
+private:
+	uint16_t _protocol; // procotol being used
+	uint16_t _port; // local port to listen on
+	IPAddress _remoteIP; // remote IP address for the incoming packet whilst it's being processed
+	uint16_t _remotePort; // remote port for the incoming packet whilst it's being processed
+	uint16_t _offset; // offset into the packet being sent
 
+protected:
+	uint8_t sockindex;
+	uint16_t _remaining; // remaining bytes of incoming packet yet to be processed
+	Ethernet_packet ep;
+	
+public:
+	EthernetRaw() : sockindex(MAX_SOCK_NUM) {}  // Constructor
+	virtual uint8_t begin();      // initialize socket 0. Returns 1 if successful, 0 if not.
+	virtual void stop();  // Finish with the UDP socket
+
+	// Sending RAW packets
+
+	// Start building up a packet to send to the remote host specific in ip and port
+	// Returns 1 if successful, 0 if there was a problem with the supplied IP address or port
+	virtual int beginPacket(IPAddress ip, uint16_t port);
+	// Finish off this packet and send it
+	// Returns 1 if the packet was sent successfully, 0 if there was an error
+	virtual int endPacket();
+	// Write a single byte into the packet
+	virtual size_t write(uint8_t);
+	// Write size bytes from buffer into the packet
+	virtual size_t write(const uint8_t *buffer, size_t size);
+
+	//using Print::write;
+
+	// Start processing the next available incoming packet
+	// Returns the size of the packet in bytes, or 0 if no packets are available
+	virtual int parsePacket();
+	// Number of bytes remaining in the current packet
+	virtual int available();
+	// Read a single byte from the current packet
+	virtual int read();
+	// Read up to len bytes from the current packet and place them into buffer
+	// Returns the number of bytes read, or 0 if none are available
+	virtual int read(unsigned char* buffer, size_t len);
+	// Read up to len characters from the current packet and place them into buffer
+	// Returns the number of characters read, or 0 if none are available
+	virtual int read(char* buffer, size_t len) { return read((unsigned char*)buffer, len); };
+	// Return the next byte from the current packet without moving on to the next byte
+	virtual int peek();
+	virtual void flush(); // Finish reading the current packet
+
+	// Return the IP address of the host who sent the current incoming packet
+	virtual IPAddress remoteIP() { return _remoteIP; };
+	// Return the port of the host who sent the current incoming packet
+	virtual uint16_t remotePort() { return _remotePort; };
+	virtual uint16_t localPort() { return _port; }
+};
 
 
 class EthernetClient : public Client {
@@ -315,6 +378,37 @@ public:
 	int checkLease();
 };
 
+class LinkLocalClass {
+private:
+	uint8_t  _llMacAddr[6];
+	uint32_t _llLocalPort;
+
+#ifdef __arm__
+	uint8_t  _llLocalIp[4] __attribute__((aligned(4)));
+	uint8_t  _llSubnetMask[4] __attribute__((aligned(4)));
+	uint8_t  _llGatewayIp[4] __attribute__((aligned(4)));
+#else
+	uint8_t  _llLocalIp[4];
+	uint8_t  _llSubnetMask[4];
+	uint8_t  _llGatewayIp[4];
+#endif
+	unsigned long _timeout;
+	unsigned long _responseTimeout;
+	unsigned long _lastCheckLeaseMillis;
+	EthernetRaw _llRawSocket;
+
+	void printByte(char *, uint8_t);
+
+protected:
+	Ethernet_packet _llep;
+	
+public:
+	IPAddress getLocalIp();
+	IPAddress getSubnetMask();
+	IPAddress getGatewayIp();
+
+	int beginWithLinkLocal(uint8_t *);
+};
 
 
 

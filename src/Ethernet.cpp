@@ -22,14 +22,19 @@
 #include "Ethernet.h"
 #include "utility/w5100.h"
 #include "Dhcp.h"
+#include "Linklocal.h"
 
 IPAddress EthernetClass::_dnsServerAddress;
 DhcpClass* EthernetClass::_dhcp = NULL;
+LinkLocalClass* EthernetClass::_ll = NULL;
 
 int EthernetClass::begin(uint8_t *mac, unsigned long timeout, unsigned long responseTimeout)
 {
 	static DhcpClass s_dhcp;
 	_dhcp = &s_dhcp;
+
+	static LinkLocalClass s_ll;
+	_ll = &s_ll;
 
 	// Initialise the basic info
 	if (W5100.init() == 0) return 0;
@@ -49,6 +54,19 @@ int EthernetClass::begin(uint8_t *mac, unsigned long timeout, unsigned long resp
 		W5100.setSubnetMask(_dhcp->getSubnetMask().raw_address());
 		SPI.endTransaction();
 		_dnsServerAddress = _dhcp->getDnsServerIp();
+		socketPortRand(micros());
+		return ret;
+	}
+	// Negotiate a Link-Local address
+	ret = _ll->beginWithLinkLocal(mac);
+	if (ret == 1) {
+		// We've successfully found a Link Local address
+		// so set things accordingly
+		SPI.beginTransaction(SPI_ETHERNET_SETTINGS);
+		W5100.setIPAddress(_ll->getLocalIp().raw_address());
+		W5100.setGatewayIp(_ll->getGatewayIp().raw_address());
+		W5100.setSubnetMask(_ll->getSubnetMask().raw_address());
+		SPI.endTransaction();
 		socketPortRand(micros());
 	}
 	return ret;
@@ -145,6 +163,9 @@ int EthernetClass::maintain()
 			//this is actually an error, it will retry though
 			break;
 		}
+	}
+	if (_ll != NULL) {
+		// Use Link-Local if DHCP failed (or doesn't exist)
 	}
 	return rc;
 }

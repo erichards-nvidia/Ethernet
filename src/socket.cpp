@@ -123,6 +123,55 @@ makesocket:
 	return s;
 }
 
+uint8_t EthernetClass::socketBeginRaw(uint8_t protocol, uint16_t port)
+{
+	uint8_t s, status;
+
+	SPI.beginTransaction(SPI_ETHERNET_SETTINGS);
+	// look at all the hardware sockets, use any that are closed (unused)
+	status = W5100.readSnSR(0);
+	if (status == SnSR::CLOSED) goto makesocket;
+
+	//Serial.printf("W5000socket step2\n");
+	// as a last resort, forcibly close any already closing
+	uint8_t stat = status;
+	if (stat == SnSR::LAST_ACK) goto closemakesocket;
+	if (stat == SnSR::TIME_WAIT) goto closemakesocket;
+	if (stat == SnSR::FIN_WAIT) goto closemakesocket;
+	if (stat == SnSR::CLOSING) goto closemakesocket;
+#if 0
+	Serial.printf("W5000socket step3\n");
+	// next, use if effectively closed
+	if (stat == SnSR::CLOSE_WAIT) goto closemakesocket;
+#endif
+	SPI.endTransaction();
+	return MAX_SOCK_NUM; // socket 0 is in use
+closemakesocket:
+	//Serial.printf("W5000socket close\n");
+	W5100.execCmdSn(0, Sock_CLOSE);
+makesocket:
+	//Serial.printf("W5000socket %d\n", s);
+	EthernetServer::server_port[0] = 0;
+	delayMicroseconds(250); // TODO: is this needed??
+	W5100.writeSnMR(0, protocol);
+	W5100.writeSnIR(0, 0xFF);
+	if (port > 0) {
+		W5100.writeSnPORT(0, port);
+	} else {
+		// if don't set the source port, set local_port number.
+		if (++local_port < 49152) local_port = 49152;
+		W5100.writeSnPORT(0, local_port);
+	}
+	W5100.execCmdSn(0, Sock_OPEN);
+	state[0].RX_RSR = 0;
+	state[0].RX_RD  = W5100.readSnRX_RD(0); // always zero?
+	state[0].RX_inc = 0;
+	state[0].TX_FSR = 0;
+	//Serial.printf("W5000socket prot=%d, RX_RD=%d\n", W5100.readSnMR(s), state[s].RX_RD);
+	SPI.endTransaction();
+	return 0;
+}
+
 // multicast version to set fields before open  thd
 uint8_t EthernetClass::socketBeginMulticast(uint8_t protocol, IPAddress ip, uint16_t port)
 {
